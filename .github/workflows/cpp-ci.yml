@@ -129,6 +129,17 @@ jobs:
 
           tar -czf cpp-release.tar.gz \
             -C package .
+    # Docker build
+      - name: Build Docker Image
+        run: |
+            docker build \
+            -t cpp-calculator:${{ github.sha }} .
+
+        # Test container
+      - name: Smoke Test Docker Container
+        run: |
+            docker run --rm \
+            cpp-calculator:${{ github.sha }}
 
       # 15. Upload artifact
       - name: Upload Release Artifact

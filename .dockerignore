@@ -1,0 +1,9 @@
+.git
+.github
+build/
+build-coverage/
+build-sanitizer/
+coverage/
+tests/
+*.tar.gz
+README.md
