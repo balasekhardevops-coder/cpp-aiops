@@ -1,0 +1,22 @@
+# CMake generated files
+build/
+package/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Testing/
+
+# Compiled objects and libraries
+*.o
+*.a
+*.so
+*.so.*
+*.out
+
+# Executables and packages
+*.exe
+*.tar.gz
+
+# IDE files
+.vscode/
+.idea/
