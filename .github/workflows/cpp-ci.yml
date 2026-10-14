@@ -10,62 +10,80 @@ permissions:
 
 jobs:
   cpp-ci:
-    name: Build, Scan, Test and Package
     runs-on: ubuntu-24.04
     timeout-minutes: 40
 
     steps:
       # 1. Checkout
-      - name: Checkout source code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      # 2. Verify tools
-      - name: Verify build tools
+      # 2. Install coverage tool
+      - name: Install gcovr
         run: |
-          set -euo pipefail
-          gcc --version
-          g++ --version
-          cmake --version
-          ctest --version
+          sudo apt-get update
+          sudo apt-get install -y gcovr
 
       # 3. Configure Release build
-      - name: CMake Configure
+      - name: Configure Release
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=ON \
+            -DBUILD_TESTING=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      # 4. Compile application
-      - name: Build C++ Application
+      # 4. Compile and link
+      - name: Build Release
         run: |
           cmake --build build \
             --config Release \
             --parallel 4
 
-      # 5. Functional unit tests
-      - name: Run CTest
+      # 5. Configure coverage build
+      - name: Configure Coverage
         run: |
-          ctest --test-dir build \
-            -C Release \
+          cmake -S . -B build-coverage \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DENABLE_COVERAGE=ON
+
+      # 6. Compile coverage build
+      - name: Build Coverage
+        run: |
+          cmake --build build-coverage \
+            --config Debug \
+            --parallel 4
+
+      # 7. Run coverage tests
+      - name: Run Coverage Tests
+        run: |
+          ctest --test-dir build-coverage \
+            -C Debug \
             --output-on-failure
 
-      # 6. Verify compilation database
-      - name: Verify Compile Commands
+      # 8. Generate coverage report
+      - name: Generate Coverage
         run: |
-          test -s build/compile_commands.json
+          mkdir -p coverage
 
-      # 7. SonarQube static analysis
+          gcovr \
+            --root . \
+            --filter 'src/' \
+            --exclude 'src/main.cpp' \
+            --sonarqube coverage/sonarqube.xml \
+            build-coverage
+
+      # 9. SonarQube analysis
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-      # 8. SonarQube Quality Gate
+      # 10. Quality Gate
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
         with:
@@ -74,8 +92,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-      # 9. Configure sanitizer build
-      - name: Configure Sanitizer Build
+      # 11. Configure sanitizer build
+      - name: Configure Sanitizers
         run: |
           cmake -S . -B build-sanitizer \
             -DCMAKE_BUILD_TYPE=Debug \
@@ -83,14 +101,14 @@ jobs:
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
 
-      # 10. Build with sanitizers
+      # 12. Compile sanitizer build
       - name: Build With Sanitizers
         run: |
           cmake --build build-sanitizer \
             --config Debug \
             --parallel 4
 
-      # 11. Runtime security tests
+      # 13. Execute sanitizer tests
       - name: Run Sanitizer Tests
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
@@ -100,24 +118,19 @@ jobs:
             -C Debug \
             --output-on-failure
 
-      # 12. Install production executable
-      - name: Install Production Binary
+      # 14. Install and package Release
+      - name: Package Release
         run: |
           cmake --install build \
             --config Release \
             --prefix "$GITHUB_WORKSPACE/package"
 
-      # 13. Create release package
-      - name: Package
-        run: |
           test -x package/bin/calculator
 
           tar -czf cpp-release.tar.gz \
             -C package .
 
-          tar -tzf cpp-release.tar.gz
-
-      # 14. Upload artifact
+      # 15. Upload artifact
       - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
         with:
