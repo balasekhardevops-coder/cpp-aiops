@@ -1,17 +1,8 @@
 
-name: C++ Linux CI Pipeline
+name: C++ Linux DevSecOps Pipeline
 
 on:
   push:
-    branches:
-      - main
-      - develop
-
-  pull_request:
-    branches:
-      - main
-      - develop
-
   workflow_dispatch:
 
 permissions:
@@ -19,58 +10,105 @@ permissions:
 
 jobs:
   cpp-ci:
-    name: Build, Test and Package
+    name: Build, Scan, Test and Package
     runs-on: ubuntu-24.04
-
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
-      # STEP 1: Checkout
+      # 1. Checkout
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      # STEP 2: Verify build tools
+      # 2. Verify tools
       - name: Verify build tools
         run: |
           set -euo pipefail
-
           gcc --version
           g++ --version
           cmake --version
           ctest --version
 
-      # STEP 3: CMake Configure
+      # 3. Configure Release build
       - name: CMake Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=ON
+            -DBUILD_TESTING=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      # STEP 4: Build
-      - name: Build C++ application
+      # 4. Compile application
+      - name: Build C++ Application
         run: |
           cmake --build build \
             --config Release \
             --parallel 4
 
-      # STEP 5: Unit Tests
+      # 5. Functional unit tests
       - name: Run CTest
         run: |
           ctest --test-dir build \
             -C Release \
             --output-on-failure
 
-      # STEP 6: Install production binary
-      - name: Install binaries
+      # 6. Verify compilation database
+      - name: Verify Compile Commands
+        run: |
+          test -s build/compile_commands.json
+
+      # 7. SonarQube static analysis
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+      # 8. SonarQube Quality Gate
+      - name: SonarQube Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
+        with:
+          pollingTimeoutSec: 300
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+      # 9. Configure sanitizer build
+      - name: Configure Sanitizer Build
+        run: |
+          cmake -S . -B build-sanitizer \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      # 10. Build with sanitizers
+      - name: Build With Sanitizers
+        run: |
+          cmake --build build-sanitizer \
+            --config Debug \
+            --parallel 4
+
+      # 11. Runtime security tests
+      - name: Run Sanitizer Tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ctest --test-dir build-sanitizer \
+            -C Debug \
+            --output-on-failure
+
+      # 12. Install production executable
+      - name: Install Production Binary
         run: |
           cmake --install build \
             --config Release \
             --prefix "$GITHUB_WORKSPACE/package"
 
-      # STEP 7: Package
-      - name: Create release archive
+      # 13. Create release package
+      - name: Package
         run: |
           test -x package/bin/calculator
 
@@ -79,8 +117,8 @@ jobs:
 
           tar -tzf cpp-release.tar.gz
 
-      # STEP 8: Upload artifact
-      - name: Upload release artifact
+      # 14. Upload artifact
+      - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
         with:
           name: cpp-calculator-linux-release
