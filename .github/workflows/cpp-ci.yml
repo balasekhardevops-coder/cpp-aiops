@@ -1,0 +1,89 @@
+
+name: C++ Linux CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+  pull_request:
+    branches:
+      - main
+      - develop
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpp-ci:
+    name: Build, Test and Package
+    runs-on: ubuntu-24.04
+
+    timeout-minutes: 30
+
+    steps:
+      # STEP 1: Checkout
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # STEP 2: Verify build tools
+      - name: Verify build tools
+        run: |
+          set -euo pipefail
+
+          gcc --version
+          g++ --version
+          cmake --version
+          ctest --version
+
+      # STEP 3: CMake Configure
+      - name: CMake Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON
+
+      # STEP 4: Build
+      - name: Build C++ application
+        run: |
+          cmake --build build \
+            --config Release \
+            --parallel 4
+
+      # STEP 5: Unit Tests
+      - name: Run CTest
+        run: |
+          ctest --test-dir build \
+            -C Release \
+            --output-on-failure
+
+      # STEP 6: Install production binary
+      - name: Install binaries
+        run: |
+          cmake --install build \
+            --config Release \
+            --prefix "$GITHUB_WORKSPACE/package"
+
+      # STEP 7: Package
+      - name: Create release archive
+        run: |
+          test -x package/bin/calculator
+
+          tar -czf cpp-release.tar.gz \
+            -C package .
+
+          tar -tzf cpp-release.tar.gz
+
+      # STEP 8: Upload artifact
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-calculator-linux-release
+          path: cpp-release.tar.gz
+          if-no-files-found: error
+          retention-days: 7
